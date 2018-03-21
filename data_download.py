@@ -17,7 +17,30 @@ def parse_data(data_file):
     csvfile = open(data_file, 'r')
     csvreader = csv.reader(csvfile)
     key_url_list = [line[:2] for line in csvreader]
-    return key_url_list[1:]  # Chop off header
+    if key_url_list[0][0] == "id":
+        key_url_list.pop(0)
+    return key_url_list  # Chop off header
+
+
+def unique(sequence):
+    seen = set()
+    return [x for x in sequence if not (x in seen or seen.add(x))]
+
+
+def find_first_ind(data, prev_downloads, prev_errors):
+    current_ind_d = 0
+    current_ind_e = 0
+    for current_ind, data_line in enumerate(data):
+        if current_ind_d < len(prev_downloads) and data_line[0] == prev_downloads[current_ind_d]:
+            current_ind_d += 1
+        elif current_ind_e < len(prev_errors) and data_line[0] == prev_errors[current_ind_e]:
+            current_ind_e += 1
+        else:
+            if current_ind_d != len(prev_downloads) or current_ind_e != len(prev_errors):
+                continue
+            else:
+                break
+    return current_ind
 
 
 def _bytes_feature(value):
@@ -94,7 +117,7 @@ if __name__ == "__main__":
     size = 299
 
     data_file = os.path.join(input_folder, "index.csv")
-    key_url_list = parse_data(data_file)
+    key_url_dict = parse_data(data_file)
 
     opts = tf.python_io.TFRecordOptions(tf.python_io.TFRecordCompressionType.ZLIB)
 
@@ -106,13 +129,15 @@ if __name__ == "__main__":
     skipped_file = os.path.join(output_folder, 'skipped.csv')
     if os.path.exists(skipped_file):
         data = parse_data(skipped_file)
-        previous_skipped_keys = [a[0] for a in data]
+        previous_skipped_keys = unique([a[0] for a in data])
 
     previous_downloaded_keys = []
     downloaded_file = os.path.join(output_folder, 'downloaded.csv')
     if os.path.exists(downloaded_file):
         data = parse_data(downloaded_file)
-        previous_downloaded_keys = [a[0] for a in data]
+        previous_downloaded_keys = unique([a[0] for a in data])
+
+    first_ind_to_download = find_first_ind(key_url_dict, previous_downloaded_keys, previous_skipped_keys)
 
     skipped = open(skipped_file, 'a')
     downloaded = open(downloaded_file, 'a')
@@ -127,10 +152,10 @@ if __name__ == "__main__":
         restart_non_zero = True
 
     writer = tf.python_io.TFRecordWriter(tfrecords_filename.format(current_tf_file), options=opts)
-    total = len(key_url_list)
+    total = len(key_url_dict)
     print("starting download")
     print('')
-    for x in key_url_list:
+    for x in key_url_dict[first_ind_to_download:]:
         key = x[0]
         url = x[1]
         if key in previous_skipped_keys + previous_downloaded_keys:
