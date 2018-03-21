@@ -1,3 +1,30 @@
+# This script generates a HTML file that represents the submission file you're sending
+# it shows, for the 50 first doc in test, the 30 first prediction images so that you can control
+# easily if they match the test document
+# All images are clickable
+
+# The css to use is :
+#    .bordered {
+#        border: 1px solid black
+#    }
+#
+#    .predictions_div {
+#        'overflow-x': 'scroll';
+#        width="700px";
+#    }
+#
+#    .predictions_table {
+#        border-collapse: collapse;
+#        display: block;
+#        width=2000px;
+#    }
+#
+#    ul {
+#        list-style-type: none;
+#    }
+#
+# To display the html, go in the report directory and run "python -m SimpleHTTPServer 8000"
+
 from yattag import Doc, indent
 import csv
 import os
@@ -8,6 +35,9 @@ doc.asis('<!DOCTYPE html>')
 
 
 def parse_data(data_file):
+    """
+    read index files
+    """
     csvfile = open(data_file, 'r')
     csvreader = csv.reader(csvfile)
     key_url_list = {line[0]: line[1] for line in csvreader}
@@ -15,6 +45,9 @@ def parse_data(data_file):
 
 
 def generate_image_link(key, key_url_list):
+    """
+    generate element for 1 image
+    """
     url = key_url_list[key]
     with tag('div', width='120px'):
         with tag('ul'):
@@ -26,6 +59,9 @@ def generate_image_link(key, key_url_list):
 
 
 def generate_doc_images_list(doc_id, prediction_lists, key_url_list):
+    """
+    generate 1 line (example + predictions)
+    """
     with tag('table'):
         with tag('tr'):
             with tag("td", klass="bordered"):
@@ -42,6 +78,7 @@ def generate_doc_images_list(doc_id, prediction_lists, key_url_list):
 
 if __name__ == "__main__":
 
+    # input files
     data_index_file = "index.csv"
     key_url_list = parse_data(data_index_file)
 
@@ -49,7 +86,7 @@ if __name__ == "__main__":
     key_url_list_test = parse_data(data_test_file)
     key_url_list.update(key_url_list_test)
 
-
+    # Predictions
     report_file = "/Users/cyrilpoulet/PycharmProjects/monuments/reports/sample_submission.csv"
     docs = []
     prediction_lists = {}
