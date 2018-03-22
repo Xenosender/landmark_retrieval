@@ -55,7 +55,7 @@ def run_experiment(hparams):
     input_size = 299
     if not os.path.exists(hparams.output_dir):
         os.makedirs(hparams.output_dir)
-    output_file = os.path.join(hparams.output_dir, 'inception_tfrecord_{}.tfrecord')
+    output_file = os.path.join(hparams.output_dir, 'inception_tfrecord_{}.tfrecords')
     current_output_file = hparams.start_index_output
     nb_output_by_file = 10000
     current_output_ind = 0
@@ -85,13 +85,14 @@ def run_experiment(hparams):
                     if current_output_ind and current_output_ind % nb_output_by_file == 0:
                         if writer:
                             writer.close()
-                        current_output_ind += 1
+                        current_output_file += 1
                         writer = tf.python_io.TFRecordWriter(output_file.format(current_output_file))
                         errors.flush()
 
                     res_in = sess.run(img)
                     res_in = res_in[np.newaxis, ...]
                     with tf.contrib.slim.arg_scope(inception_resnet_v2_arg_scope()):
+                        # 8, 8, 1536, float32
                         conv_out = sess.run(last_conv_endpoint, feed_dict={input_placeholder: res_in})
                     try:
                         write_example(writer, conv_out[0], key, height, width)
