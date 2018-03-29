@@ -8,7 +8,7 @@ from data_download import read_file
 from tensorflow.contrib.training.python.training import hparam
 
 
-def model_fn(features):
+def model_fn(features, inception_dir):
     with tf.contrib.slim.arg_scope(inception_resnet_v2_arg_scope()):
         output = inception_resnet_v2(features, num_classes=None, is_training=False,
                                      dropout_keep_prob=1,
@@ -18,7 +18,7 @@ def model_fn(features):
                                      activation_fn=tf.nn.relu)
 
     tf.train.init_from_checkpoint(
-        'inception_resnet_v2_2016_08_30.ckpt',
+        os.path.join(inception_dir, 'inception_resnet_v2_2016_08_30.ckpt'),
         {"InceptionResnetV2/": "InceptionResnetV2/"})
 
     return output
@@ -66,7 +66,7 @@ def run_experiment(hparams):
 
     with tf.Graph().as_default():
         input_placeholder = tf.placeholder(tf.float32, shape=[1, 299, 299, 3])
-        logits, endpoints = model_fn(input_placeholder)
+        logits, endpoints = model_fn(input_placeholder, hparams.inception_dir)
         last_conv_endpoint = endpoints["Conv2d_7b_1x1"]
 
         with tf.Session() as sess:
@@ -135,6 +135,10 @@ if __name__ == '__main__':
         '--start-index-output',
         type=int,
         default=0
+    )
+    parser.add_argument(
+        '--inception-dir',
+        required=True
     )
     parser.add_argument(
         '--verbosity',

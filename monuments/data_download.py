@@ -109,14 +109,14 @@ if __name__ == "__main__":
     ERASE_LINE = '\033[K'
 
     input_folder = "."
-    output_folder = "train"
+    output_folder = "test"
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
 
     nb_images_by_tffile = 1000
     size = 299
 
-    data_file = os.path.join(input_folder, "index.csv")
+    data_file = os.path.join(input_folder, "test.csv")
     key_url_dict = parse_data(data_file)
 
     opts = tf.python_io.TFRecordOptions(tf.python_io.TFRecordCompressionType.ZLIB)
