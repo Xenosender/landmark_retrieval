@@ -4,8 +4,38 @@ import os
 import tensorflow as tf
 import numpy as np
 from inception_resnet_v2 import inception_resnet_v2, inception_resnet_v2_arg_scope
-from data_download import read_file
 from tensorflow.contrib.training.python.training import hparam
+
+from tensorflow.python.lib.io import file_io
+
+
+def parse_example(serialized_example, img_size):
+    features = tf.parse_single_example(
+        serialized_example,
+        # Defaults are not specified since both keys are required.
+        features={
+            'img_raw': tf.FixedLenFeature([], tf.string),
+            'key': tf.FixedLenFeature([1], tf.string),
+            'height': tf.FixedLenFeature([1], tf.int64),
+            'width': tf.FixedLenFeature([1], tf.int64)
+        })
+
+    key = features['key']
+    height = tf.cast(features['height'], tf.int32)
+    width = tf.cast(features['width'], tf.int32)
+    image = tf.image.decode_jpeg(features['img_raw'], channels=3)
+    image.set_shape([img_size, img_size, 3])
+    image = tf.image.convert_image_dtype(image, tf.float32)
+    return key, image, height, width
+
+
+def input_fn(filenames, img_size, read_opts):
+    dataset = tf.data.TFRecordDataset(filenames, compression_type=read_opts)
+    dataset = dataset.map(lambda x: parse_example(x, img_size))
+    dataset = dataset.batch(10)
+    iterator = dataset.make_one_shot_iterator()
+    key, image, height, width = iterator.get_next()
+    return key, image, height, width
 
 
 def model_fn(features, inception_dir):
@@ -51,10 +81,10 @@ def write_example(writer, image, key, height, width):
 def run_experiment(hparams):
     """Run the training and evaluate using the high level API"""
 
-    read_opts = tf.python_io.TFRecordOptions(tf.python_io.TFRecordCompressionType.ZLIB)
+    read_opts = "ZLIB"
     input_size = 299
-    if not os.path.exists(hparams.output_dir):
-        os.makedirs(hparams.output_dir)
+    if not file_io.file_exists(hparams.output_dir):
+        file_io.recursive_create_dir(hparams.output_dir)
     output_file = os.path.join(hparams.output_dir, 'inception_tfrecord_{}.tfrecords')
     current_output_file = hparams.start_index_output
     nb_output_by_file = 10000
@@ -62,45 +92,54 @@ def run_experiment(hparams):
 
     writer = tf.python_io.TFRecordWriter(output_file.format(current_output_file))
     error_files = os.path.join(hparams.output_dir, 'errors.csv')
-    errors = open(error_files, 'a')
+    errors = file_io.FileIO(error_files, 'a')
 
-    with tf.Graph().as_default():
-        input_placeholder = tf.placeholder(tf.float32, shape=[1, 299, 299, 3])
-        logits, endpoints = model_fn(input_placeholder, hparams.inception_dir)
+    input_files = [f for f in file_io.list_directory(hparams.input_dir) if 'tfrecord' in f]
+    if not len(input_files):
+        tf.logging.error('Error: no file detected')
+        return
+    tf.logging.info('Detected {} input files'.format(len(input_files)))
+    input_files = sorted(input_files, key=lambda f:int(f[f.rfind('_')+1:f.rfind('.')]))
+    input_files = [os.path.join(hparams.input_dir, f) for f in input_files]
+
+    with tf.device("/device:GPU:0"):
+        key, image, height, width = input_fn(input_files, input_size, read_opts)
+        logits, endpoints = model_fn(image, hparams.inception_dir)
         last_conv_endpoint = endpoints["Conv2d_7b_1x1"]
 
-        with tf.Session() as sess:
+        with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
             init = [tf.local_variables_initializer(), tf.global_variables_initializer()]
             sess.run(init)
+            sess.graph.finalize()
 
-            for i in range(hparams.nb_files):
-                input_tfrecord = hparams.input_files.format(i)
-                if not os.path.exists(input_tfrecord):
-                    print('{} not found : quitting'.format(input_tfrecord))
-                    return
-
-                data_iterator = read_file(input_tfrecord, read_opts, input_size)
-
-                for key, img, width, height in data_iterator:
+            while True:
+                try:
+                    # tf.logging.info('running doc {}'.format(key))
                     if current_output_ind and current_output_ind % nb_output_by_file == 0:
+                        tf.logging.info('closing writer {}'.format(current_output_file))
                         if writer:
                             writer.close()
                         current_output_file += 1
                         writer = tf.python_io.TFRecordWriter(output_file.format(current_output_file))
                         errors.flush()
 
-                    res_in = sess.run(img)
-                    res_in = res_in[np.newaxis, ...]
                     with tf.contrib.slim.arg_scope(inception_resnet_v2_arg_scope()):
                         # 8, 8, 1536, float32
-                        conv_out = sess.run(last_conv_endpoint, feed_dict={input_placeholder: res_in})
-                    try:
-                        write_example(writer, conv_out[0], key, height, width)
-                        current_output_ind += 1
+                        key_val, h, w, conv_out = sess.run([key, height, width, last_conv_endpoint])
 
-                    except:
-                        print('{} not converted'.format(key))
-                        errors.write(key + "\n")
+                        for k in range(key_val.shape[0]):
+                            try:
+                                write_example(writer, conv_out[k], key_val[k][0], h[k][0], w[k][0])
+                                current_output_ind += 1
+                            except Exception as e:
+                                tf.logging.warning('{} not converted : {}'.format(key_val[k][0], e.message))
+                                errors.write(key_val[k][0] + "\n")
+
+                    if current_output_ind and current_output_ind % 1000 == 0:
+                        tf.logging.info('Processed {}'.format(current_output_ind))
+                except tf.errors.OutOfRangeError:
+                    break
+                # tf.logging.info('{} found in file {}'.format(nb_examples_in_file, input_f))
 
     if errors:
         errors.close()
@@ -112,7 +151,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     # Input Arguments
     parser.add_argument(
-        '--input-files',
+        '--input-dir',
         help='GCS or local paths to input data',
         required=True
     )
@@ -120,11 +159,6 @@ if __name__ == '__main__':
         '--start-index',
         type=int,
         default=0
-    )
-    parser.add_argument(
-        '--nb-files',
-        type=int,
-        required=True
     )
     parser.add_argument(
         '--output-dir',
@@ -153,7 +187,7 @@ if __name__ == '__main__':
         help='Set logging verbosity'
     )
 
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
 
     # Set python level verbosity
     tf.logging.set_verbosity(args.verbosity)
