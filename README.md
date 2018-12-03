@@ -10,3 +10,6 @@ apply_inception_resnet.py
 -------------------------
 
 You need to get inception_resnet_v2.py from tensorflow Models github and the associated models
+
+
+Author : Cyril Poulet
